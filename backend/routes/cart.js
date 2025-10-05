@@ -45,4 +45,20 @@ router.get('/', auth, async (req, res) => {
   res.json(cart || { items: [] });
 });
 
+// Remove product from cart
+router.delete('/:productId', auth, async (req, res) => {
+  try {
+    const { productId } = req.params;
+    let cart = await Cart.findOne({ userId: req.userId });
+    if (!cart) return res.json({ success: true });
+
+    cart.items = cart.items.filter(i => i.productId.toString() !== productId);
+    await cart.save();
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Remove from cart error:', error);
+    res.status(500).json({ success: false, error: 'Failed to remove item from cart' });
+  }
+});
+
 module.exports = router;

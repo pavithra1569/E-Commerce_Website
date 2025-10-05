@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import SearchBar from "../components/SearchBar";
 import ProductCard from "../components/ProductCard";
 
@@ -21,38 +21,50 @@ export default function Products() {
   const [filteredProducts, setFilteredProducts] = useState([]);
 
   useEffect(() => {
-    fetch(`http://localhost:5000/api/products?category=${selectedCategory}`)
+    const controller = new AbortController();
+    const params = new URLSearchParams();
+    if (selectedCategory) params.append('category', selectedCategory);
+    if (searchTerm) params.append('q', searchTerm);
+
+    fetch(`http://localhost:5000/api/products?${params.toString()}`, { signal: controller.signal })
       .then((res) => res.json())
       .then((data) => {
-        console.log('Products API response:', data);
-        if (data && data.length > 0) {
-          setProducts(data.slice(0, 12));
-          setFilteredProducts(data.slice(0, 12));
+        if (Array.isArray(data)) {
+          setProducts(data);
+          setFilteredProducts(data);
         } else {
-          // Fallback to sample products when API returns empty
-          const sampleProducts = getSampleProducts(selectedCategory);
-          setProducts(sampleProducts);
-          setFilteredProducts(sampleProducts);
+          setProducts([]);
+          setFilteredProducts([]);
         }
       })
       .catch((error) => {
-        console.error('Products API error:', error);
-        // Fallback to sample products on API error
-        const sampleProducts = getSampleProducts(selectedCategory);
-        setProducts(sampleProducts);
-        setFilteredProducts(sampleProducts);
+        if (error.name !== 'AbortError') {
+          console.error('Products API error:', error);
+          const sampleProducts = getSampleProducts(selectedCategory);
+          const filtered = searchTerm
+            ? sampleProducts.filter(p => p.name.toLowerCase().includes(searchTerm.toLowerCase()))
+            : sampleProducts;
+          setProducts(filtered);
+          setFilteredProducts(filtered);
+        }
       });
-  }, [selectedCategory]);
 
+    return () => controller.abort();
+  }, [selectedCategory, searchTerm]);
+
+  // Client-side filter as a safety net when backend search unavailable
   useEffect(() => {
-    if (searchTerm) {
-      const filtered = products.filter(product =>
-        product.name.toLowerCase().includes(searchTerm.toLowerCase())
-      );
-      setFilteredProducts(filtered);
-    } else {
+    if (!searchTerm) {
       setFilteredProducts(products);
+      return;
     }
+    const needle = searchTerm.toLowerCase();
+    const filtered = products.filter(product =>
+      (product.name && product.name.toLowerCase().includes(needle)) ||
+      (product.description && product.description.toLowerCase().includes(needle)) ||
+      (product.category && product.category.toLowerCase().includes(needle))
+    );
+    setFilteredProducts(filtered);
   }, [searchTerm, products]);
 
   const getSampleProducts = (category) => {

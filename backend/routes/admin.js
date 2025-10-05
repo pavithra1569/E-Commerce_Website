@@ -41,7 +41,10 @@ router.get('/users', adminAuth, async (req, res) => {
 // Get all orders
 router.get('/orders', adminAuth, async (req, res) => {
   try {
-    const orders = await Order.find({}).populate('userId', 'name email').sort({ createdAt: -1 });
+    const orders = await Order.find({})
+      .populate('userId', 'name email')
+      .populate('items.productId', 'name image price')
+      .sort({ createdAt: -1 });
     res.json(orders);
   } catch (error) {
     console.error('Admin orders fetch error:', error);
@@ -54,14 +57,21 @@ router.get('/stats', adminAuth, async (req, res) => {
   try {
     const totalUsers = await User.countDocuments();
     const totalOrders = await Order.countDocuments();
-    const totalRevenue = await Order.aggregate([
+    const revenueAgg = await Order.aggregate([
+      { $match: { paymentStatus: { $in: ['paid', 'cod_pending'] } } },
       { $group: { _id: null, total: { $sum: '$total' } } }
     ]);
-    
+
+    const totalRevenue = revenueAgg[0]?.total || 0;
+    const paidOrders = await Order.countDocuments({ paymentStatus: 'paid' });
+    const codOrders = await Order.countDocuments({ paymentMethod: 'cod' });
+
     res.json({
       totalUsers,
       totalOrders,
-      totalRevenue: totalRevenue[0]?.total || 0
+      totalRevenue,
+      paidOrders,
+      codOrders
     });
   } catch (error) {
     console.error('Admin stats fetch error:', error);

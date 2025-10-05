@@ -76,6 +76,10 @@ exports.login = async (req, res) => {
 exports.googleLogin = async (req, res) => {
   try {
     const { token } = req.body;
+
+    if (!token) {
+      return res.status(400).json({ error: 'Missing Google ID token' });
+    }
     
     if (!process.env.GOOGLE_CLIENT_ID) {
       return res.status(500).json({ error: 'Google OAuth not configured' });
@@ -86,6 +90,10 @@ exports.googleLogin = async (req, res) => {
       audience: process.env.GOOGLE_CLIENT_ID,
     });
     const payload = ticket.getPayload();
+
+    if (!payload || !payload.email_verified) {
+      return res.status(401).json({ error: 'Unverified Google account' });
+    }
     
     let user = await User.findOne({ email: payload.email });
     let isNewUser = false;
@@ -127,7 +135,10 @@ exports.googleLogin = async (req, res) => {
     });
   } catch (err) {
     console.error('Google login error:', err);
-    res.status(401).json({ error: 'Google login failed' });
+    const msg = err?.message?.includes('Wrong number of segments')
+      ? 'Invalid Google token'
+      : (err?.message || 'Google login failed');
+    res.status(401).json({ error: msg });
   }
 };
 

@@ -4,6 +4,16 @@ import { Link } from "react-router-dom";
 export default function Cart() {
   const [cart, setCart] = useState(null);
   const [message, setMessage] = useState("");
+  const [showPayment, setShowPayment] = useState(false);
+  const [paymentMethod, setPaymentMethod] = useState('card'); // card | upi | cod
+  const [payment, setPayment] = useState({
+    name: "",
+    cardNumber: "",
+    expiry: "",
+    cvv: "",
+    upiId: ""
+  });
+  const [isPaying, setIsPaying] = useState(false);
 
   useEffect(() => {
     const token = localStorage.getItem("token");
@@ -32,7 +42,7 @@ export default function Cart() {
     }
   }, []);
 
-  const handleOrder = async () => {
+  const handleOrder = async (paymentMeta = {}) => {
     if (!cart || !cart.items || cart.items.length === 0) {
       setMessage("Your cart is empty. Add some products first!");
       return;
@@ -46,10 +56,15 @@ export default function Cart() {
           Authorization: `Bearer ${token}`,
           "Content-Type": "application/json"
         },
+        body: JSON.stringify({
+          paymentMethod: paymentMethod,
+          transactionId: paymentMeta.transactionId,
+          items: cart.items
+        })
       });
       const data = await res.json();
       if (data.success) {
-        setMessage("Order placed successfully!");
+        setMessage("Payment successful and order placed!");
         // Clear user-specific cart
         const user = localStorage.getItem("user");
         if (user) {
@@ -58,6 +73,8 @@ export default function Cart() {
           localStorage.removeItem(userCartKey);
         }
         setCart({ items: [] });
+        // Notify navbar/cart observers to refresh cart count
+        window.dispatchEvent(new CustomEvent('cartUpdated'));
       } else {
         setMessage(data.error || "Order failed");
       }
@@ -65,6 +82,42 @@ export default function Cart() {
       console.error('Order API error:', error);
       setMessage("Failed to place order. Please try again.");
     }
+  };
+
+  const handlePaymentSubmit = async (e) => {
+    e.preventDefault();
+
+    // COD does not require online payment details
+    if (paymentMethod === 'cod') {
+      setShowPayment(false);
+      await handleOrder();
+      return;
+    }
+
+    // Card/UPI validations
+    if (paymentMethod === 'card') {
+      if (!payment.name || !payment.cardNumber || !payment.expiry || !payment.cvv) {
+        setMessage("Please fill all card details");
+        return;
+      }
+    }
+    if (paymentMethod === 'upi') {
+      if (!payment.upiId) {
+        setMessage("Please enter a valid UPI ID");
+        return;
+      }
+    }
+
+    setIsPaying(true);
+    setMessage("");
+
+    // Simulate a payment processing delay and return a mock transactionId
+    setTimeout(async () => {
+      setIsPaying(false);
+      setShowPayment(false);
+      const txId = `${paymentMethod.toUpperCase()}_${Date.now()}`;
+      await handleOrder({ transactionId: txId });
+    }, 1200);
   };
 
   const getTotalPrice = () => {
@@ -191,9 +244,9 @@ export default function Cart() {
               
               <button
                 className="w-full bg-blue-600 text-white py-3 px-6 rounded-full font-semibold hover:bg-blue-700 transition-colors mb-4"
-                onClick={handleOrder}
+                onClick={() => setShowPayment(true)}
               >
-                Place Order
+                Proceed to Payment
               </button>
               
               <Link 
@@ -214,6 +267,123 @@ export default function Cart() {
           </div>
         )}
       </div>
+
+      {showPayment && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-xl font-semibold">Payment</h3>
+              <button onClick={() => setShowPayment(false)} className="text-gray-500 hover:text-gray-700">✕</button>
+            </div>
+
+            <form onSubmit={handlePaymentSubmit} className="space-y-4">
+              {/* Payment method selector */}
+              <div className="flex gap-2">
+                {[
+                  { key: 'card', label: 'Card' },
+                  { key: 'upi', label: 'UPI' },
+                  { key: 'cod', label: 'Cash on Delivery' }
+                ].map(m => (
+                  <button
+                    key={m.key}
+                    type="button"
+                    onClick={() => setPaymentMethod(m.key)}
+                    className={`px-3 py-2 rounded-full text-sm border ${paymentMethod === m.key ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-700 border-gray-300'}`}
+                  >
+                    {m.label}
+                  </button>
+                ))}
+              </div>
+
+              {paymentMethod === 'card' && (
+                <>
+                  <div>
+                    <label className="block text-sm text-gray-600 mb-1">Cardholder Name</label>
+                    <input
+                      type="text"
+                      value={payment.name}
+                      onChange={(e) => setPayment(p => ({ ...p, name: e.target.value }))}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                      placeholder="John Doe"
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm text-gray-600 mb-1">Card Number</label>
+                    <input
+                      type="text"
+                      value={payment.cardNumber}
+                      onChange={(e) => setPayment(p => ({ ...p, cardNumber: e.target.value }))}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                      placeholder="4242 4242 4242 4242"
+                      inputMode="numeric"
+                      required
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm text-gray-600 mb-1">Expiry</label>
+                      <input
+                        type="text"
+                        value={payment.expiry}
+                        onChange={(e) => setPayment(p => ({ ...p, expiry: e.target.value }))}
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                        placeholder="MM/YY"
+                        required
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm text-gray-600 mb-1">CVV</label>
+                      <input
+                        type="password"
+                        value={payment.cvv}
+                        onChange={(e) => setPayment(p => ({ ...p, cvv: e.target.value }))}
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                        placeholder="123"
+                        inputMode="numeric"
+                        required
+                      />
+                    </div>
+                  </div>
+                </>
+              )}
+
+              {paymentMethod === 'upi' && (
+                <div>
+                  <label className="block text-sm text-gray-600 mb-1">UPI ID</label>
+                  <input
+                    type="text"
+                    value={payment.upiId}
+                    onChange={(e) => setPayment(p => ({ ...p, upiId: e.target.value }))}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                    placeholder="username@bank"
+                    required
+                  />
+                </div>
+              )}
+
+              {paymentMethod === 'cod' && (
+                <div className="text-sm text-gray-600 bg-yellow-50 border border-yellow-200 p-3 rounded">
+                  You chose Cash on Delivery. You will pay in cash when the product is delivered.
+                </div>
+              )}
+
+              <div className="flex items-center justify-between border-t pt-4">
+                <span className="text-gray-700 font-medium">Total</span>
+                <span className="text-blue-600 font-bold text-lg">₹{getTotalPrice().toLocaleString()}</span>
+              </div>
+
+              <button
+                type="submit"
+                disabled={isPaying}
+                className={`w-full ${isPaying ? 'bg-blue-400' : 'bg-blue-600 hover:bg-blue-700'} text-white py-3 px-6 rounded-full font-semibold transition-colors`}
+              >
+                {paymentMethod === 'cod' ? 'Place Order (COD)' : (isPaying ? 'Processing...' : 'Pay Now')}
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

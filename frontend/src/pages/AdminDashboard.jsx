@@ -1,13 +1,16 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import toast from "react-hot-toast";
+const API_URL = process.env.REACT_APP_API_URL || "http://localhost:5000";
 
 export default function AdminDashboard() {
   const [stats, setStats] = useState({
     totalUsers: 0,
     totalProducts: 0,
     totalOrders: 0,
-    totalRevenue: 0
+    totalRevenue: 0,
+    paidOrders: 0,
+    codOrders: 0,
   });
   const [users, setUsers] = useState([]);
   const [products, setProducts] = useState([]);
@@ -28,6 +31,8 @@ export default function AdminDashboard() {
     }
 
     fetchDashboardData();
+    const id = setInterval(fetchDashboardData, 10000);
+    return () => clearInterval(id);
   }, [navigate]);
 
   const fetchDashboardData = async () => {
@@ -35,58 +40,61 @@ export default function AdminDashboard() {
       const token = localStorage.getItem('token');
       
       // Fetch users
-      const usersRes = await fetch('http://localhost:5000/api/admin/users', {
+      const usersRes = await fetch(`${API_URL}/api/admin/users`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       const usersData = await usersRes.json();
       
       // Fetch products
-      const productsRes = await fetch('http://localhost:5000/api/products');
+      const productsRes = await fetch(`${API_URL}/api/products`);
       const productsData = await productsRes.json();
       
       // Fetch orders
-      const ordersRes = await fetch('http://localhost:5000/api/admin/orders', {
+      const ordersRes = await fetch(`${API_URL}/api/admin/orders`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       const ordersData = await ordersRes.json();
+
+      // Fetch backend computed stats for real-time accuracy
+      let statsData = null;
+      try {
+        const statsRes = await fetch(`${API_URL}/api/admin/stats`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        if (statsRes.ok) {
+          statsData = await statsRes.json();
+        }
+      } catch {}
 
       setUsers(usersData || []);
       setProducts(productsData || []);
       setOrders(ordersData || []);
       
-      // Calculate stats
-      setStats({
-        totalUsers: usersData?.length || 0,
-        totalProducts: productsData?.length || 0,
-        totalOrders: ordersData?.length || 0,
-        totalRevenue: ordersData?.reduce((sum, order) => sum + (order.total || 0), 0) || 0
-      });
+      // Prefer backend stats when available
+      if (statsData && typeof statsData === 'object') {
+        setStats({
+          totalUsers: statsData.totalUsers ?? (usersData?.length || 0),
+          totalProducts: productsData?.length || 0,
+          totalOrders: statsData.totalOrders ?? (ordersData?.length || 0),
+          totalRevenue: statsData.totalRevenue ?? (ordersData?.reduce((sum, order) => sum + (order.total || 0), 0) || 0),
+          paidOrders: statsData.paidOrders ?? (ordersData?.filter(o => o.paymentStatus === 'paid').length || 0),
+          codOrders: statsData.codOrders ?? (ordersData?.filter(o => o.paymentMethod === 'cod').length || 0),
+        });
+      } else {
+        // Fallback to client-side computed stats
+        setStats({
+          totalUsers: usersData?.length || 0,
+          totalProducts: productsData?.length || 0,
+          totalOrders: ordersData?.length || 0,
+          totalRevenue: ordersData?.reduce((sum, order) => sum + (order.total || 0), 0) || 0,
+          paidOrders: ordersData?.filter(o => o.paymentStatus === 'paid').length || 0,
+          codOrders: ordersData?.filter(o => o.paymentMethod === 'cod').length || 0,
+        });
+      }
       
       setLoading(false);
     } catch (error) {
       console.error('Failed to fetch dashboard data:', error);
-      // Use mock data for demonstration
-      setStats({
-        totalUsers: 156,
-        totalProducts: 89,
-        totalOrders: 234,
-        totalRevenue: 125000
-      });
-      setUsers([
-        { _id: '1', name: 'John Doe', email: 'john@example.com', provider: 'local', createdAt: '2024-01-15' },
-        { _id: '2', name: 'Jane Smith', email: 'jane@example.com', provider: 'google', createdAt: '2024-01-20' },
-        { _id: '3', name: 'Mike Johnson', email: 'mike@example.com', provider: 'local', createdAt: '2024-02-01' }
-      ]);
-      setProducts([
-        { _id: '1', name: 'MacBook Pro 14-inch', price: '₹1,99,900', category: 'Laptops' },
-        { _id: '2', name: 'iPhone 15 Pro', price: '₹1,34,900', category: 'Smartphones' },
-        { _id: '3', name: 'Sony WH-1000XM5', price: '₹29,990', category: 'Headphones' }
-      ]);
-      setOrders([
-        { _id: '1', userId: '1', total: 199900, status: 'completed', createdAt: '2024-02-15' },
-        { _id: '2', userId: '2', total: 134900, status: 'pending', createdAt: '2024-02-20' },
-        { _id: '3', userId: '3', total: 29990, status: 'shipped', createdAt: '2024-02-25' }
-      ]);
       setLoading(false);
     }
   };
@@ -166,6 +174,7 @@ export default function AdminDashboard() {
               <div className="ml-4">
                 <p className="text-sm font-medium text-gray-600">Total Revenue</p>
                 <p className="text-2xl font-semibold text-gray-900">₹{stats.totalRevenue.toLocaleString()}</p>
+                <p className="text-xs text-gray-500">Paid Orders: {stats.paidOrders} • COD Orders: {stats.codOrders}</p>
               </div>
             </div>
           </div>
@@ -301,6 +310,7 @@ export default function AdminDashboard() {
                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Order ID</th>
                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Customer</th>
                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Total</th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Payment</th>
                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
                       </tr>
@@ -309,8 +319,19 @@ export default function AdminDashboard() {
                       {orders.map((order) => (
                         <tr key={order._id}>
                           <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">#{order._id}</td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{order.userId}</td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{order.userId?.email || order.userId?.name || String(order.userId)}</td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">₹{order.total?.toLocaleString()}</td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                            <span className="mr-2 capitalize">{order.paymentMethod}</span>
+                            <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
+                              order.paymentStatus === 'paid' ? 'bg-green-100 text-green-800' :
+                              order.paymentStatus === 'cod_pending' ? 'bg-yellow-100 text-yellow-800' :
+                              order.paymentStatus === 'failed' ? 'bg-red-100 text-red-800' :
+                              'bg-gray-100 text-gray-800'
+                            }`}>
+                              {order.paymentStatus}
+                            </span>
+                          </td>
                           <td className="px-6 py-4 whitespace-nowrap">
                             <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
                               order.status === 'completed' ? 'bg-green-100 text-green-800' :
